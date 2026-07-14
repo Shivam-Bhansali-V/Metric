@@ -59,7 +59,9 @@ export default function App() {
     }
     const options: RequestInit = { method, headers };
     if (body) options.body = JSON.stringify(body);
-    const resp = await fetch(endpoint, options);
+    
+    const baseUrl = import.meta.env.VITE_API_URL || '';
+    const resp = await fetch(`${baseUrl}${endpoint}`, options);
     if (!resp.ok) throw new Error(`API error: ${resp.statusText}`);
     return await resp.json();
   }, []);
