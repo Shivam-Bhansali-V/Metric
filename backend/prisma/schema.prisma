@@ -1,0 +1,118 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Workspace {
+  id         String @id @default("default")
+  name       String
+  currency   String
+  hourlyRate Float  @map("hourly_rate") @default(0.0)
+
+  @@map("workspace")
+}
+
+model Client {
+  id       String    @id
+  name     String
+  projects Project[]
+
+  @@map("client")
+}
+
+model UserProfile {
+  id        String   @id
+  email     String   @unique
+  username  String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  projects               Project[]
+  timeEntries            TimeEntry[]
+  reminders              Reminder[]
+  notificationsReceived  Notification[] @relation("NotificationRecipient")
+  notificationsSent      Notification[] @relation("NotificationSender")
+
+  @@map("user_profile")
+}
+
+model Project {
+  id          String       @id
+  name        String
+  clientId    String?      @map("client_id")
+  client      Client?      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  color       String       @default("#ccc")
+  billable    Boolean      @default(true)
+  rate        Float        @default(0.0)
+  timeEntries TimeEntry[]
+  reminders   Reminder[]
+  userId      String?      @map("user_id")
+  user        UserProfile? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("project")
+}
+
+model Tag {
+  id          String         @id
+  name        String
+  timeEntries TimeEntryTag[]
+
+  @@map("tag")
+}
+
+model TimeEntry {
+  id          String       @id
+  description String       @default("")
+  projectId   String?      @map("project_id")
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  billable    Boolean      @default(true)
+  start       DateTime
+  end         DateTime?
+  tags        TimeEntryTag[]
+  assignee    String?
+  userId      String?      @map("user_id")
+  user        UserProfile? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("time_entry")
+}
+
+model Reminder {
+  id          String       @id
+  description String
+  notes       String?
+  projectId   String?      @map("project_id")
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee    String?
+  scheduledAt DateTime     @map("scheduled_at")
+  triggered   Boolean      @default(false)
+  userId      String?      @map("user_id")
+  user        UserProfile? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reminder")
+}
+
+model Notification {
+  id          String      @id
+  recipientId String      @map("recipient_id")
+  recipient   UserProfile @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  senderId    String      @map("sender_id")
+  sender      UserProfile @relation("NotificationSender", fields: [senderId], references: [id], onDelete: Cascade)
+  message     String
+  read        Boolean     @default(false)
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@map("notification")
+}
+
+model TimeEntryTag {
+  timeEntryId String    @map("time_entry_id")
+  tagId       String    @map("tag_id")
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([timeEntryId, tagId])
+  @@map("time_entry_tags")
+}

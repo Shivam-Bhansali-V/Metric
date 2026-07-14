@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: clockify-lite-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        value: 416670200325-1q195mjuj2ha2rfkpvprc2do6se1ertl.apps.googleusercontent.com
+      - key: PORT
+        value: 5000
