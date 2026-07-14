@@ -30,7 +30,7 @@ Ensure you have **Node.js** and **npm** installed.
 Create a `.env` file in the `backend/` folder:
 ```env
 DATABASE_URL="your-supabase-connection-string"
-GOOGLE_CLIENT_ID="416670200325-1q195mjuj2ha2rfkpvprc2do6se1ertl.apps.googleusercontent.com"
+GOOGLE_CLIENT_ID="google-api-key-set-your"
 PORT=5000
 ```
 

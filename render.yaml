@@ -9,6 +9,6 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: GOOGLE_CLIENT_ID
-        value: 416670200325-1q195mjuj2ha2rfkpvprc2do6se1ertl.apps.googleusercontent.com
+        sync: false
       - key: PORT
         value: 5000
