@@ -4,6 +4,7 @@
   "description": "Clockify-Lite Node/Express Prisma Backend API",
   "main": "index.ts",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "ts-node-dev --respawn --transpile-only index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
