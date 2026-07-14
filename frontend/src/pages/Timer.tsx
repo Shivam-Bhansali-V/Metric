@@ -270,7 +270,7 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
       {/* Tracker Bar */}
       <div className="card p-2 mb-4 tracker-bar bg-white rounded border position-relative">
         <div className="row g-2 align-items-center">
-          <div className="col-12 col-md-5">
+          <div className="col-12 col-md-4">
             <input 
               type="text" 
               className="tracker-desc px-2 fs-5 w-100 border-0" 
@@ -373,7 +373,7 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
             />
           </div>
 
-          <div className="col-12 col-md-2 d-flex align-items-center justify-content-between justify-content-md-end gap-3 mt-2 mt-md-0">
+          <div className="col-12 col-md-3 d-flex align-items-center justify-content-between justify-content-md-end gap-3 mt-2 mt-md-0">
             <div className="tracker-time font-monospace" style={{ color: 'var(--text-main)' }}>
               {state.activeTimer ? formatSeconds(elapsed) : '0:00:00'}
             </div>
