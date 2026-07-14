@@ -4,6 +4,12 @@ Metric is a premium, lightweight time tracking and task scheduling application d
 
 ---
 
+## Live Demo 🚀
+Access the live application directly on the web:
+🔗 **[metric-frontend-kohl.vercel.app/#schedule](https://metric-frontend-kohl.vercel.app/#schedule)**
+
+---
+
 ## Features
 - **Live Time Tracker**: Start, stop, and tag project tasks in real-time.
 - **Task Scheduler**: Plan tasks, set reminders, and add detailed descriptions.
