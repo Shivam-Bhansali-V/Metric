@@ -71,28 +71,33 @@ export default function Projects({ state, onUpdateState, apiCall }: ProjectsProp
         <button className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>+ Create New Project</button>
       </div>
 
-      <div className="card shadow-sm border p-0 overflow-hidden bg-white">
-        <div className="table-responsive">
-          <table className="table table-hover align-middle mb-0" style={{ fontSize: '0.9rem' }}>
-            <thead className="table-light text-muted uppercase">
-              <tr>
-                <th style={{ paddingLeft: '1.5rem', fontWeight: 600 }}>Project Name</th>
-                <th style={{ fontWeight: 600 }}>Client</th>
-                <th style={{ fontWeight: 600 }}>Tracked Time</th>
-                <th style={{ fontWeight: 600 }}>Hourly Rate</th>
-                <th style={{ fontWeight: 600 }}>Billable</th>
-                <th style={{ paddingRight: '1.5rem', textAlign: 'right', fontWeight: 600 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.projects.length === 0 ? (
+      {state.projects.length === 0 ? (
+        <div className="card shadow-sm border-0 bg-white text-center py-5 d-flex flex-column align-items-center justify-content-center" style={{ minHeight: '300px', borderRadius: 'var(--border-radius-md)' }}>
+          <div className="mb-3 d-flex align-items-center justify-content-center" style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--primary-light)', color: 'var(--primary-color)' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
+          <h5 className="fw-bold mb-2" style={{ color: 'var(--text-main)' }}>No projects found</h5>
+          <p className="small mb-4" style={{ maxWidth: '300px', color: 'var(--text-muted)' }}>Get started by creating a project to organize your time entries and generate accurate reports.</p>
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ Create New Project</button>
+        </div>
+      ) : (
+        <div className="card shadow-sm border p-0 overflow-hidden bg-white">
+          <div className="table-responsive">
+            <table className="table table-hover align-middle mb-0" style={{ fontSize: '0.9rem' }}>
+              <thead className="table-light text-muted uppercase">
                 <tr>
-                  <td colSpan={6} className="text-center py-4 text-muted">
-                    No projects created. Click "+ Create New Project" to get started.
-                  </td>
+                  <th style={{ paddingLeft: '1.5rem', fontWeight: 600 }}>Project Name</th>
+                  <th style={{ fontWeight: 600 }}>Client</th>
+                  <th style={{ fontWeight: 600 }}>Tracked Time</th>
+                  <th style={{ fontWeight: 600 }}>Hourly Rate</th>
+                  <th style={{ fontWeight: 600 }}>Billable</th>
+                  <th style={{ paddingRight: '1.5rem', textAlign: 'right', fontWeight: 600 }}>Actions</th>
                 </tr>
-              ) : (
-                state.projects.map(p => {
+              </thead>
+              <tbody>
+                {state.projects.map(p => {
                   const client = state.clients.find(c => c.id === p.clientId);
                   const secs = projectDurations[p.id] || 0;
                   return (
@@ -112,12 +117,12 @@ export default function Projects({ state, onUpdateState, apiCall }: ProjectsProp
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {showModal && (
         <div className="modal fade show" tabIndex={-1} style={{ display: 'block', backgroundColor: 'rgba(33,37,41,0.5)', zIndex: 1050 }}>

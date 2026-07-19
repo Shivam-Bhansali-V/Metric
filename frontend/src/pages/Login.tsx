@@ -59,7 +59,7 @@ export default function Login({ onLoginSuccess, apiCall }: LoginProps) {
       if ((window as any).google) {
         clearInterval(initInterval);
         (window as any).google.accounts.id.initialize({
-          client_id: '416670200325-1q195mjuj2ha2rfkpvprc2do6se1ertl.apps.googleusercontent.com',
+          client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
           callback: (window as any).handleCredentialResponse,
         });
         
@@ -132,16 +132,15 @@ export default function Login({ onLoginSuccess, apiCall }: LoginProps) {
   };
 
   return (
-    <div className="d-flex align-items-center justify-content-center min-vh-100 position-relative" style={{ zIndex: 1 }}>
-      {/* Background Blurs */}
-      <div className="glow-mesh glow-mesh-1"></div>
-      <div className="glow-mesh glow-mesh-2"></div>
-      <div className="glow-mesh glow-mesh-3"></div>
+    <div className="d-flex align-items-center justify-content-center min-vh-100 position-relative overflow-hidden" style={{ zIndex: 1, backgroundColor: 'var(--bg-app)' }}>
+      {/* Decorative ambient blobs */}
+      <div className="position-absolute rounded-circle" style={{ width: '400px', height: '400px', background: 'radial-gradient(circle, rgba(99, 102, 241, 0.12) 0%, transparent 70%)', top: '10%', left: '10%', zIndex: 0 }}></div>
+      <div className="position-absolute rounded-circle" style={{ width: '400px', height: '400px', background: 'radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%)', bottom: '10%', right: '10%', zIndex: 0 }}></div>
 
-      <div className="card shadow-lg p-4 bg-white border border-light" style={{ width: '100%', maxWidth: '420px', borderRadius: '16px', zIndex: 10 }}>
+      <div className="card shadow-lg p-5 border active-timer-card" style={{ width: '100%', maxWidth: '420px', borderRadius: 'var(--border-radius-lg)', background: 'var(--bg-card)', borderColor: 'var(--border-color)', zIndex: 10 }}>
         <div className="text-center mb-4">
-          <img src="/logo.png" alt="Metric Logo" className="mb-2" style={{ width: '40px', height: '40px', borderRadius: '8px' }} />
-          <h3 className="fw-bold text-dark mb-1">Metric</h3>
+          <img src="/logo.png" alt="Metric Logo" className="mb-3" style={{ width: '48px', height: '48px', borderRadius: '10px', boxShadow: '0 4px 15px rgba(99, 102, 241, 0.4)' }} />
+          <h2 className="fw-bold mb-1" style={{ color: 'var(--text-main)', fontSize: '1.8rem', fontFamily: 'Outfit, sans-serif' }}>Metric</h2>
           <p className="text-muted small">Daily progress & task tracking simplified</p>
         </div>
 
@@ -171,7 +170,7 @@ export default function Login({ onLoginSuccess, apiCall }: LoginProps) {
           /* register page to select a unique username */
           <form onSubmit={handleRegister} className="d-flex flex-column gap-3">
             <div className="text-start">
-              <h5 className="fw-bold text-dark mb-1" style={{ fontSize: '1.05rem' }}>Choose Your Username</h5>
+              <h5 className="fw-bold mb-1" style={{ fontSize: '1.05rem', color: 'var(--text-main)' }}>Choose Your Username</h5>
               <p className="text-muted small mb-0">Create a unique handle for your metric logs.</p>
             </div>
 

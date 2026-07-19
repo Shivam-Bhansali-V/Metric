@@ -31,6 +31,8 @@ export interface TimeEntry {
   billable: boolean;
   start: string;
   end: string | null;
+  accumulatedTime?: number;
+  isPaused?: boolean;
   assignee?: string;
 }
 

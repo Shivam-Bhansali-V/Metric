@@ -30,6 +30,14 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
   const [newProjName, setNewProjName] = useState('');
   const [newProjColor, setNewProjColor] = useState(PRESET_COLORS[0]);
 
+  // Project Edit
+  const [editingProjId, setEditingProjId] = useState<string | null>(null);
+  const [editProjName, setEditProjName] = useState('');
+
+  // Tag Management
+  const [showTags, setShowTags] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+
   const intervalRef = useRef<any>(null);
 
   // Sync state with active timer on load/update
@@ -42,12 +50,25 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
       setAssignee(state.activeTimer.assignee || '');
       
       const startMs = new Date(state.activeTimer.start).getTime();
-      setElapsed(Math.floor((Date.now() - startMs) / 1000));
+      const accumulated = state.activeTimer.accumulatedTime || 0;
+      const isPausedOnBackend = state.activeTimer.isPaused || false;
+
+      const calcElapsed = () => {
+        if (isPausedOnBackend) {
+          return accumulated;
+        } else {
+          return accumulated + Math.floor((Date.now() - startMs) / 1000);
+        }
+      };
+
+      setElapsed(calcElapsed());
 
       if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startMs) / 1000));
-      }, 1000);
+      if (!isPausedOnBackend) {
+        intervalRef.current = setInterval(() => {
+          setElapsed(calcElapsed());
+        }, 1000);
+      }
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -88,24 +109,48 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
     }
   };
 
-  const handleStartStop = async () => {
+  const handleStart = async () => {
+    try {
+      const newState = await apiCall('/api/timer/start', 'POST', {
+        description: desc.trim(),
+        projectId,
+        tagIds,
+        billable,
+        assignee: assignee.trim() || null
+      });
+      onUpdateState(newState);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handlePause = async () => {
     if (state.activeTimer) {
       try {
-        const newState = await apiCall('/api/timer/stop', 'POST', {
-          description: desc.trim() || "(no description)",
-          projectId,
-          tagIds,
-          billable,
-          assignee: assignee.trim() || null
-        });
+        const newState = await apiCall('/api/timer/pause', 'POST');
         onUpdateState(newState);
       } catch (err) {
         console.error(err);
       }
-    } else {
+    }
+  };
+
+  const handleResume = async () => {
+    if (state.activeTimer) {
       try {
-        const newState = await apiCall('/api/timer/start', 'POST', {
-          description: desc.trim(),
+        const newState = await apiCall('/api/timer/resume', 'POST');
+        onUpdateState(newState);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  const handleStop = async () => {
+    if (state.activeTimer) {
+      try {
+        const newState = await apiCall('/api/timer/stop', 'POST', {
+          description: desc.trim() || "(no description)",
           projectId,
           tagIds,
           billable,
@@ -131,7 +176,6 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
     }
   };
 
-  // Quick Create Project inside Dropdown
   const handleQuickCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProjName.trim()) return;
@@ -145,8 +189,7 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
       });
       onUpdateState(newState);
 
-      // Auto select the newly created project
-      const createdProj = newState.projects.find(p => p.name === newProjName.trim());
+      const createdProj = newState.projects.find((p: any) => p.name === newProjName.trim());
       if (createdProj) {
         await selectProject(createdProj.id);
       }
@@ -155,6 +198,44 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
       setShowProjDropdown(false);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleEditProject = async (pId: string) => {
+    if (!editProjName.trim()) return;
+    try {
+      const newState = await apiCall(`/api/projects/${pId}`, 'PUT', {
+        name: editProjName.trim()
+      });
+      onUpdateState(newState);
+      setEditingProjId(null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreateTag = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTagName.trim()) return;
+    try {
+      const newState = await apiCall('/api/tags', 'POST', { name: newTagName.trim() });
+      onUpdateState(newState);
+      setNewTagName('');
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteTag = async (id: string) => {
+    try {
+      const newState = await apiCall(`/api/tags/${id}`, 'DELETE');
+      onUpdateState(newState);
+    } catch (err) { console.error(err); }
+  };
+
+  const toggleTag = (id: string) => {
+    const newTags = tagIds.includes(id) ? tagIds.filter(t => t !== id) : [...tagIds, id];
+    setTagIds(newTags);
+    if (state.activeTimer) {
+      apiCall('/api/timer/update', 'POST', { tagIds: newTags }).then(onUpdateState).catch(console.error);
     }
   };
 
@@ -268,7 +349,7 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
       </div>
 
       {/* Tracker Bar */}
-      <div className="card p-2 mb-4 tracker-bar bg-white rounded border position-relative">
+      <div className={`card p-2 mb-4 tracker-bar bg-white rounded border position-relative ${state.activeTimer ? 'active-timer-card' : ''}`}>
         <div className="row g-2 align-items-center">
           <div className="col-12 col-md-4">
             <input 
@@ -309,16 +390,45 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
                       No Project
                     </button>
                     {state.projects.filter(p => p.name.toLowerCase().includes(projQuery.toLowerCase())).map(p => (
-                      <button 
-                        key={p.id} 
-                        type="button" 
-                        className="list-group-item list-group-item-action d-flex align-items-center gap-2 text-start py-1"
-                        style={{ background: 'var(--bg-card)', color: 'var(--text-main)' }}
-                        onClick={() => selectProject(p.id)}
-                      >
-                        <span className="color-dot" style={{ backgroundColor: p.color }}></span>
-                        <span>{p.name}</span>
-                      </button>
+                      <div key={p.id} className="list-group-item d-flex align-items-center justify-content-between py-1" style={{ background: 'var(--bg-card)' }}>
+                        {editingProjId === p.id ? (
+                          <div className="d-flex w-100 gap-1">
+                            <input autoFocus className="form-control form-control-sm" value={editProjName} onChange={e => setEditProjName(e.target.value)} />
+                            <button className="btn btn-sm btn-success py-0 px-2" onClick={() => handleEditProject(p.id)}>✓</button>
+                            <button className="btn btn-sm btn-secondary py-0 px-2" onClick={() => setEditingProjId(null)}>✕</button>
+                          </div>
+                        ) : (
+                          <>
+                            <button 
+                              type="button" 
+                              className="btn btn-link text-start p-0 text-decoration-none d-flex align-items-center gap-2 flex-grow-1"
+                              style={{ color: 'var(--text-main)' }}
+                              onClick={() => selectProject(p.id)}
+                            >
+                              <span className="color-dot" style={{ backgroundColor: p.color }}></span>
+                              <span>{p.name}</span>
+                            </button>
+                             <div className="d-flex align-items-center gap-2">
+                              <button 
+                                className="btn btn-sm text-muted p-0" 
+                                title="Copy Client Share Link"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const url = `${window.location.origin}/#portal/${p.id}`;
+                                  navigator.clipboard.writeText(url);
+                                  alert(`Copied client portal link:\n${url}`);
+                                }}
+                                style={{ fontSize: '0.75rem', textDecoration: 'underline' }}
+                              >
+                                Share
+                              </button>
+                              <button className="btn btn-sm text-muted p-0" onClick={(e) => { e.stopPropagation(); setEditProjName(p.name); setEditingProjId(p.id); }}>
+                                ✎
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     ))}
                   </div>
                   
@@ -357,6 +467,35 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
                 </div>
               )}
             </div>
+            {/* Tags Dropdown */}
+            <div className="position-relative ms-2">
+              <button 
+                className={`picker-btn ${tagIds.length > 0 ? 'active' : ''}`} 
+                onClick={() => setShowTags(!showTags)}
+                title="Tags"
+              >
+                Tags {tagIds.length > 0 ? `(${tagIds.length})` : ''}
+              </button>
+              {showTags && (
+                <div className="dropdown-menu show p-2 border shadow-lg position-absolute" style={{ zIndex: 1000, top: '100%', right: 0, minWidth: '200px', background: 'var(--bg-card)' }}>
+                  <div className="mb-2">
+                    {state.tags.map(t => (
+                      <div key={t.id} className="d-flex align-items-center justify-content-between mb-1">
+                        <label className="d-flex align-items-center gap-2 m-0" style={{cursor:'pointer', color:'var(--text-main)', fontSize:'0.85rem'}}>
+                          <input type="checkbox" checked={tagIds.includes(t.id)} onChange={() => toggleTag(t.id)} />
+                          {t.name}
+                        </label>
+                        <button className="btn btn-sm text-danger p-0" onClick={() => handleDeleteTag(t.id)}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <form onSubmit={handleCreateTag} className="d-flex gap-1 mt-2 border-top pt-2">
+                    <input type="text" className="form-control form-control-sm" placeholder="New tag" value={newTagName} onChange={e => setNewTagName(e.target.value)} />
+                    <button type="submit" className="btn btn-sm btn-primary">+</button>
+                  </form>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="col-12 col-md-2">
@@ -364,7 +503,7 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
             <input 
               type="text" 
               className="form-control form-control-sm border-0" 
-              placeholder="👤 Assign to..." 
+              placeholder="Assign to..." 
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
               onBlur={handleAssigneeBlur}
@@ -373,16 +512,49 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
             />
           </div>
 
-          <div className="col-12 col-md-3 d-flex align-items-center justify-content-between justify-content-md-end gap-3 mt-2 mt-md-0">
-            <div className="tracker-time font-monospace" style={{ color: 'var(--text-main)' }}>
+          <div className="col-12 col-md-3 d-flex align-items-center justify-content-between justify-content-md-end gap-2 mt-2 mt-md-0">
+            <div className="tracker-time font-monospace me-2" style={{ color: 'var(--text-main)', fontSize: '1.2rem' }}>
               {state.activeTimer ? formatSeconds(elapsed) : '0:00:00'}
             </div>
-            <button 
-              className={`btn btn-sm px-4 fw-bold ${state.activeTimer ? 'btn-danger' : 'btn-primary'}`} 
-              onClick={handleStartStop}
-            >
-              {state.activeTimer ? 'Stop' : 'Start'}
-            </button>
+            {state.activeTimer ? (
+              <div className="d-flex gap-1">
+                {state.activeTimer.isPaused ? (
+                  <button 
+                    className="btn btn-sm btn-success px-2 fw-bold d-flex align-items-center gap-1" 
+                    onClick={handleResume}
+                    title="Resume paused timer"
+                    style={{ fontSize: '0.8rem' }}
+                  >
+                    Resume
+                  </button>
+                ) : (
+                  <button 
+                    className="btn btn-sm btn-warning px-2 fw-bold d-flex align-items-center gap-1" 
+                    onClick={handlePause}
+                    title="Pause current timer"
+                    style={{ fontSize: '0.8rem' }}
+                  >
+                    Pause
+                  </button>
+                )}
+                <button 
+                  className="btn btn-sm btn-danger active-timer-pulse px-2 fw-bold d-flex align-items-center gap-1" 
+                  onClick={handleStop}
+                  title="Stop and save time log"
+                  style={{ fontSize: '0.8rem' }}
+                >
+                  Stop
+                </button>
+              </div>
+            ) : (
+              <button 
+                className="btn btn-sm btn-primary px-3 fw-bold d-flex align-items-center gap-1" 
+                onClick={handleStart}
+                style={{ fontSize: '0.8rem' }}
+              >
+                Start
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -392,9 +564,13 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
         <div className="col-lg-8">
           <h5 className="fw-semibold text-muted mb-3" style={{ fontSize: '0.9rem' }}>Time Logs</h5>
           {sortedDates.length === 0 ? (
-            <div className="card p-5 text-center text-muted shadow-sm">
-              <span className="fs-3 mb-2">⏱️</span>
-              No tracked hours found. Start the timer above to log your first work task!
+            <div className="card p-5 text-center text-muted shadow-sm d-flex flex-column align-items-center justify-content-center" style={{ minHeight: '300px', background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+              <svg width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mb-4">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+              <h5 className="fw-bold mb-2" style={{ color: 'var(--text-main)' }}>No time entries yet</h5>
+              <p className="small mb-0" style={{ maxWidth: '280px', color: 'var(--text-muted)' }}>Start the timer above to log your first work task and see your day take shape.</p>
             </div>
           ) : (
             sortedDates.map(dateStr => (
@@ -407,7 +583,7 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
                       const durSec = e.end ? Math.max(0, Math.floor((new Date(e.end).getTime() - new Date(e.start).getTime()) / 1000)) : 0;
                       
                       return (
-                        <div key={e.id} className="list-group-item d-flex align-items-center justify-content-between py-2 px-3 gap-2" style={{ background: 'var(--bg-card)', color: 'var(--text-main)', borderColor: 'var(--border-color)' }}>
+                        <div key={e.id} className="list-group-item time-entry-row d-flex align-items-center justify-content-between py-2 px-3 gap-2" style={{ background: 'var(--bg-card)', color: 'var(--text-main)', borderColor: 'var(--border-color)' }}>
                           <div className="d-flex align-items-center gap-3 col-6">
                             <span className="fw-semibold" style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{e.description}</span>
                             {entryProj && (
@@ -418,7 +594,7 @@ export default function Timer({ state, onUpdateState, apiCall }: TimerProps) {
                             )}
                             {e.assignee && (
                               <span className="badge border px-2" style={{ fontSize: '0.75rem', fontWeight: 'normal', background: 'var(--bg-app)', color: 'var(--text-muted)' }}>
-                                👤 {e.assignee}
+                                {e.assignee}
                               </span>
                             )}
                           </div>

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
@@ -11,24 +12,45 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5000;
 
+// Explicit CORS allowlist — no wildcards
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
+    if (!origin) return callback(null, true); // Allow server-to-server
     const allowed = [
       'http://localhost:5173',
       'http://localhost:4173',
       'https://metric-frontend-kohl.vercel.app'
     ];
-    if (allowed.includes(origin) || origin.endsWith('.vercel.app')) {
+    if (allowed.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(new Error(`CORS: Origin '${origin}' is not allowed`));
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'X-User-Id'],
   credentials: false
 }));
+
+// Rate limiters
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again in 15 minutes.' }
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Rate limit exceeded. Slow down.' }
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/auth/', authLimiter);
 app.use(express.json({ limit: '100kb' })); // Cap payload size
 
 // Security headers
@@ -36,6 +58,9 @@ app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   next();
 });
 
@@ -66,16 +91,23 @@ function validateGoogleToken(token: string): Promise<any> {
 
 // Helper function to return full state matching frontend expectations
 async function getFullState(userId?: string) {
-  let ws = await prisma.workspace.findUnique({ where: { id: 'default' } });
-  if (!ws) {
-    ws = await prisma.workspace.create({
-      data: {
-        id: 'default',
-        name: 'My Workspace',
-        currency: 'USD',
-        hourlyRate: 0.0
-      }
-    });
+  let ws: any = null;
+  if (userId) {
+    ws = await prisma.workspace.findUnique({ where: { userId } });
+    if (!ws) {
+      const wsId = 'w_' + crypto.randomBytes(4).toString('hex');
+      ws = await prisma.workspace.create({
+        data: {
+          id: wsId,
+          name: 'My Workspace',
+          currency: 'USD',
+          hourlyRate: 0.0,
+          userId
+        }
+      });
+    }
+  } else {
+    ws = { name: 'My Workspace', currency: 'USD', hourlyRate: 0.0 };
   }
 
   if (!userId) {
@@ -90,11 +122,15 @@ async function getFullState(userId?: string) {
     };
   }
 
-  const clients = await prisma.client.findMany();
+  const clients = await prisma.client.findMany({
+    where: { userId }
+  });
   const projects = await prisma.project.findMany({
     where: { OR: [ { userId }, { userId: null } ] }
   });
-  const tags = await prisma.tag.findMany();
+  const tags = await prisma.tag.findMany({
+    where: { userId }
+  });
   const reminders = await prisma.reminder.findMany({
     where: { userId },
     orderBy: { scheduledAt: 'asc' }
@@ -153,6 +189,8 @@ async function getFullState(userId?: string) {
       billable: activeEntry.billable,
       start: activeEntry.start.toISOString(),
       end: null,
+      isPaused: activeEntry.isPaused,
+      accumulatedTime: activeEntry.accumulatedTime,
       assignee: activeEntry.assignee || ''
     } : null
   };
@@ -179,7 +217,8 @@ app.use('/api', async (req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized: User not registered' });
   }
 
-  (req as any).user = user;
+  // Define a custom property on request to avoid any
+  Object.assign(req, { user });
   next();
 });
 
@@ -313,9 +352,15 @@ app.put('/api/workspace', async (req, res) => {
     const userId = (req as any).user.id;
     const { name, currency, hourlyRate } = req.body;
     await prisma.workspace.upsert({
-      where: { id: 'default' },
+      where: { userId },
       update: { name, currency, hourlyRate },
-      create: { id: 'default', name, currency, hourlyRate }
+      create: { 
+        id: 'w_' + crypto.randomBytes(4).toString('hex'), 
+        name, 
+        currency, 
+        hourlyRate, 
+        userId 
+      }
     });
     res.json(await getFullState(userId));
   } catch (error) {
@@ -344,6 +389,8 @@ app.post('/api/timer/start', async (req, res) => {
         billable: billable !== undefined ? billable : true,
         start: start ? new Date(start) : new Date(),
         end: null,
+        accumulatedTime: 0,
+        isPaused: false,
         assignee: assignee || null,
         userId,
         tags: {
@@ -361,12 +408,63 @@ app.post('/api/timer/start', async (req, res) => {
   }
 });
 
+app.post('/api/timer/pause', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const active = await prisma.timeEntry.findFirst({ where: { userId, end: null } });
+    if (active && !active.isPaused) {
+      const elapsedSinceStart = Math.max(0, Math.floor((Date.now() - new Date(active.start).getTime()) / 1000));
+      const totalAccumulated = active.accumulatedTime + elapsedSinceStart;
+
+      await prisma.timeEntry.update({
+        where: { id: active.id },
+        data: {
+          isPaused: true,
+          accumulatedTime: totalAccumulated
+        }
+      });
+    }
+    res.json(await getFullState(userId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to pause timer' });
+  }
+});
+
+app.post('/api/timer/resume', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const active = await prisma.timeEntry.findFirst({ where: { userId, end: null } });
+    if (active && active.isPaused) {
+      await prisma.timeEntry.update({
+        where: { id: active.id },
+        data: {
+          isPaused: false,
+          start: new Date() // Reset start anchor for next ticking period
+        }
+      });
+    }
+    res.json(await getFullState(userId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to resume timer' });
+  }
+});
+
 app.post('/api/timer/stop', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const { description, projectId, tagIds, billable, assignee } = req.body;
     const active = await prisma.timeEntry.findFirst({ where: { userId, end: null } });
     if (active) {
+      let finalElapsed = active.accumulatedTime;
+      if (!active.isPaused) {
+        finalElapsed += Math.max(0, Math.floor((Date.now() - new Date(active.start).getTime()) / 1000));
+      }
+
+      const stopTime = new Date();
+      const startTimeAdjusted = new Date(stopTime.getTime() - finalElapsed * 1000);
+
       // Delete old tags relation for this entry before re-creating
       await prisma.timeEntryTag.deleteMany({ where: { timeEntryId: active.id } });
 
@@ -376,7 +474,10 @@ app.post('/api/timer/stop', async (req, res) => {
           description: description || '(no description)',
           projectId: projectId || null,
           billable: billable !== undefined ? billable : true,
-          end: new Date(),
+          start: startTimeAdjusted,
+          end: stopTime,
+          isPaused: false,
+          accumulatedTime: finalElapsed,
           assignee: assignee || active.assignee,
           tags: {
             create: (tagIds || []).map((tId: string) => ({
@@ -532,6 +633,32 @@ app.post('/api/projects', async (req, res) => {
   }
 });
 
+app.put('/api/projects/:id', async (req: express.Request & { user?: { id: string } }, res: express.Response) => {
+  try {
+    const userId = req.user?.id || (req as any).user.id;
+    const { id } = req.params;
+    const { name, clientId, color, billable, rate } = req.body;
+
+    const check = await prisma.project.findFirst({ where: { id, userId } });
+    if (!check) return res.status(403).json({ error: 'Forbidden' });
+
+    await prisma.project.update({
+      where: { id },
+      data: {
+        name,
+        clientId: clientId || null,
+        color: color || '#ccc',
+        billable: billable !== undefined ? billable : true,
+        rate: rate !== undefined ? rate : 0.0,
+      }
+    });
+    res.json(await getFullState(userId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update project' });
+  }
+});
+
 app.delete('/api/projects/:id', async (req, res) => {
   try {
     const userId = (req as any).user.id;
@@ -545,6 +672,66 @@ app.delete('/api/projects/:id', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to delete project' });
+  }
+});
+
+app.post('/api/clients', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const clientId = 'c_' + crypto.randomBytes(4).toString('hex');
+    await prisma.client.create({
+      data: { id: clientId, name, userId }
+    });
+    res.json(await getFullState(userId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to create client' });
+  }
+});
+
+app.delete('/api/clients/:id', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const { id } = req.params;
+    const check = await prisma.client.findFirst({ where: { id, userId } });
+    if (!check) return res.status(403).json({ error: 'Forbidden' });
+    await prisma.client.delete({ where: { id } });
+    res.json(await getFullState(userId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete client' });
+  }
+});
+
+app.post('/api/tags', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const tagId = 't_' + crypto.randomBytes(4).toString('hex');
+    await prisma.tag.create({
+      data: { id: tagId, name, userId }
+    });
+    res.json(await getFullState(userId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to create tag' });
+  }
+});
+
+app.delete('/api/tags/:id', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const { id } = req.params;
+    const check = await prisma.tag.findFirst({ where: { id, userId } });
+    if (!check) return res.status(403).json({ error: 'Forbidden' });
+    await prisma.tag.delete({ where: { id } });
+    res.json(await getFullState(userId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete tag' });
   }
 });
 
@@ -567,27 +754,7 @@ app.post('/api/reminders', async (req, res) => {
       }
     });
 
-    // If assignee username exists, create a notification for them
-    if (assignee && assignee.trim()) {
-      const assigneeUser = await prisma.userProfile.findUnique({
-        where: { username: assignee.trim().toLowerCase() }
-      });
-      if (assigneeUser && assigneeUser.id !== userId) {
-        const senderUser = await prisma.userProfile.findUnique({ where: { id: userId } });
-        const senderName = senderUser?.username || 'Someone';
-        const scheduledDate = new Date(scheduledAt).toLocaleString('en-IN', {
-          dateStyle: 'medium', timeStyle: 'short'
-        });
-        await prisma.notification.create({
-          data: {
-            id: 'n_' + crypto.randomBytes(6).toString('hex'),
-            recipientId: assigneeUser.id,
-            senderId: userId,
-            message: `@${senderName} assigned you a task: "${description}" — scheduled at ${scheduledDate}`
-          }
-        });
-      }
-    }
+
 
     res.json(await getFullState(userId));
   } catch (error) {
@@ -634,6 +801,12 @@ app.delete('/api/reminders/:id', async (req, res) => {
 app.post('/api/workspace/reset', async (req, res) => {
   try {
     const userId = (req as any).user.id;
+
+    // Require explicit confirmation token to prevent accidental/CSRF data wipes
+    if (req.body?.confirm !== 'RESET') {
+      return res.status(400).json({ error: 'Confirmation required. Send { confirm: "RESET" } in the request body.' });
+    }
+
     await prisma.reminder.deleteMany({ where: { userId } });
     await prisma.timeEntryTag.deleteMany({ where: { timeEntry: { userId } } });
     await prisma.timeEntry.deleteMany({ where: { userId } });
@@ -645,47 +818,49 @@ app.post('/api/workspace/reset', async (req, res) => {
   }
 });
 
-// ── Notification Endpoints ────────────────────────────────
-app.get('/api/notifications', async (req, res) => {
-  try {
-    const userId = (req as any).user.id;
-    const notifs = await prisma.notification.findMany({
-      where: { recipientId: userId },
-      orderBy: { createdAt: 'desc' },
-      take: 50
-    });
-    res.json(notifs);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch notifications' });
-  }
-});
 
-app.put('/api/notifications/:id/read', async (req, res) => {
-  try {
-    const userId = (req as any).user.id;
-    const { id } = req.params;
-    const check = await prisma.notification.findFirst({ where: { id, recipientId: userId } });
-    if (!check) return res.status(403).json({ error: 'Forbidden' });
-    await prisma.notification.update({ where: { id }, data: { read: true } });
-    res.json({ success: true });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to mark notification as read' });
-  }
-});
 
-app.put('/api/notifications/read-all', async (req, res) => {
+// Public Client Portal Endpoint (No Authentication Required)
+app.get('/api/portal/:projectId', async (req, res) => {
   try {
-    const userId = (req as any).user.id;
-    await prisma.notification.updateMany({
-      where: { recipientId: userId, read: false },
-      data: { read: true }
+    const { projectId } = req.params;
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        timeEntries: {
+          where: { NOT: { end: null } },
+          orderBy: { start: 'desc' }
+        }
+      }
     });
-    res.json({ success: true });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found or portal disabled' });
+    }
+
+    const totalDurationSecs = project.timeEntries.reduce((sum, e) => {
+      if (!e.end) return sum;
+      return sum + Math.max(0, Math.floor((new Date(e.end).getTime() - new Date(e.start).getTime()) / 1000));
+    }, 0);
+
+    res.json({
+      name: project.name,
+      color: project.color,
+      rate: project.rate,
+      billable: project.billable,
+      totalHours: Number((totalDurationSecs / 3600).toFixed(2)),
+      timeEntries: project.timeEntries.map(e => ({
+        id: e.id,
+        description: e.description,
+        start: e.start,
+        end: e.end,
+        billable: e.billable,
+        assignee: e.assignee
+      }))
+    });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to mark all as read' });
+    res.status(500).json({ error: 'Failed to retrieve client portal data' });
   }
 });
 

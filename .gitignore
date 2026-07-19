@@ -8,11 +8,12 @@ build/
 .next/
 out/
 
-# Environment files
+# Environment files — all variants in root and all subdirectories
 .env
-.env.local
-.env.production
-.env.development
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
 
 # IDE files
 .vscode/
