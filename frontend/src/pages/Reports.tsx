@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import type { AppState } from '../types';
 import { Bar } from 'react-chartjs-2';
-import { formatSeconds } from '../utils';
+
 
 export default function Reports({ state }: { state: AppState }) {
   const [dateRange, setDateRange] = useState<'thisWeek' | 'thisMonth' | 'custom'>('thisWeek');
